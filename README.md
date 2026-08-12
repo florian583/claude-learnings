@@ -138,12 +138,57 @@ unreturned episodes stay unlabeled and are retried on the next run.
 
 On macOS a LaunchAgent with `StartInterval` works too — it fires on wake if the
 laptop was asleep at a scheduled tick. (One team pattern: run the pipeline on an
-always-on machine and rsync transcripts in / `SUGGESTIONS.md` out.)
+always-on machine and rsync transcripts in / the `suggestions/` tree out —
+`--include='*/' --include='*.md' --exclude='*'` if you want only markdown.)
 
 ## Reading the output
 
-`SUGGESTIONS.md` — newest run on top. Each suggestion has a category, a short detail,
-and evidence ids like `a1b2c3d4:9f8e7d` (`<session>:<message hash>`). Resolve one:
+The SQLite DB is the source of truth; the markdown tree is a regenerated view
+(deleted and rewritten each run — the only thing preserved is your `Status:` edits):
+
+```
+~/.claude-learnings/suggestions/
+├── INDEX.md                                  ← start here: one table per project
+├── myapp/
+│   ├── skill--pr-quality-gate.md             ← one stable file per finding
+│   ├── problem--glm-empty-review-bodies.md
+│   └── ...
+└── personal/
+    └── ...
+```
+
+`INDEX.md` groups findings **per project** (projects never mix — LLM batches are
+project-homogeneous and the dedup key is `(project, category, title)`):
+
+| Finding | Category | Runs | First → last seen | Status |
+|---|---|---|---|---|
+| [pr-quality-gate](myapp/skill--pr-quality-gate.md) | new-skill | 5 | 08-01 → 08-12 | open |
+
+Each finding file carries the latest detail, occurrence count, and its evidence
+ids (`<session8>:<hash6>`, newest first). Mark a finding `done` / `dismissed` by
+editing the `Status:` line — the regenerator keeps it.
+
+Project names come from the working directory of each session. The generic
+heuristic (first path component after `projects/` or `worktrees/`, home dir →
+`personal`) usually does the right thing; override with
+`~/.claude-learnings/projects.json`:
+
+```json
+{
+  "myapp": ["myrepo", "myapp-worktrees"],
+  "client-x": ["clientx"],
+  "personal": []
+}
+```
+
+Changed the mapping after runs already happened? Reclassify history and
+re-render the tree:
+
+```sh
+python3 pipeline/backfill_projects.py
+```
+
+Resolve an evidence id:
 
 ```sh
 sqlite3 ~/.claude-learnings/episodes.db \

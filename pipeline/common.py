@@ -63,10 +63,87 @@ MIGRATIONS = (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id INTEGER, created TEXT,
       category TEXT, title TEXT, detail TEXT,
-      episode_ids TEXT,
-      UNIQUE(category, title)
+      episode_ids TEXT, project TEXT,
+      occurrences INTEGER DEFAULT 1,
+      UNIQUE(project, category, title)
     )""",
+    "ALTER TABLE suggestions ADD COLUMN project TEXT",
+    "ALTER TABLE suggestions ADD COLUMN occurrences INTEGER DEFAULT 1",
 )
+
+
+def _rebuild_suggestions(conn):
+    """DBs created before project isolation have UNIQUE(category, title),
+    which merged the same finding across repos. Rebuild with
+    UNIQUE(project, category, title) (SQLite can't ALTER a constraint)."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='suggestions'").fetchone()
+    if not row or "UNIQUE(project" in (row[0] or ""):
+        return
+    conn.executescript("""
+      CREATE TABLE suggestions_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER, created TEXT,
+        category TEXT, title TEXT, detail TEXT,
+        episode_ids TEXT, project TEXT,
+        occurrences INTEGER DEFAULT 1,
+        UNIQUE(project, category, title)
+      );
+      INSERT OR IGNORE INTO suggestions_new
+        (id, run_id, created, category, title, detail, episode_ids, project, occurrences)
+        SELECT id, run_id, created, category, title, detail, episode_ids,
+               project, COALESCE(occurrences, 1) FROM suggestions;
+      DROP TABLE suggestions;
+      ALTER TABLE suggestions_new RENAME TO suggestions;
+    """)
+
+
+# ---------------------------------------------------------------------------
+# Project classification
+#
+# Episodes store cwd-encoded slugs like '-Users-x-Projects-platform' or
+# '-Users-x--warp-worktrees-myrepo-some-branch'. classify_project() maps them
+# to a stable project name so suggestions never mix repos.
+#
+# Optional overrides: <OUT>/projects.json —
+#   {"myapp": ["myrepo", "myapp-work"], "personal": []}
+# first matching needle (case-insensitive substring of the slug) wins.
+# Generic fallback: first path component after a 'projects'/'worktrees'
+# marker; sessions in $HOME or unknown dirs → "personal".
+
+_projects_map_cache = "unset"
+def _projects_map():
+    global _projects_map_cache
+    if _projects_map_cache != "unset":
+        return _projects_map_cache
+    path = os.path.join(OUT, "projects.json")
+    m = {}
+    if os.path.exists(path):
+        try:
+            m = json.load(open(path))
+        except Exception:
+            m = {}
+    _projects_map_cache = m
+    return m
+
+def classify_project(slug):
+    s = (slug or "").lower()
+    for name, needles in _projects_map().items():
+        if any(n.lower() in s for n in needles):
+            return name
+    parts = [p for p in s.split("-") if p]
+    marker_idx = min((parts.index(m) for m in ("projects", "worktrees") if m in parts),
+                     default=None)
+    if marker_idx is not None and marker_idx + 1 < len(parts):
+        return parts[marker_idx + 1]
+    if len(parts) <= 2:  # '', '-Users-x' → sessions in $HOME
+        return "personal"
+    return parts[-1]
+
+def slugify(text, maxlen=50):
+    import re
+    s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return s[:maxlen].strip("-") or "untitled"
 
 
 def db():
@@ -78,6 +155,7 @@ def db():
             conn.execute(sql)
         except sqlite3.OperationalError:
             pass  # column/table already present
+    _rebuild_suggestions(conn)
     return conn
 
 
