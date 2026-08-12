@@ -65,6 +65,17 @@ export LEARN_LLM_MODEL=deepseek/deepseek-v4-flash
 # …same shape for LiteLLM, OpenCode Go, OpenAI itself, etc.
 ```
 
+### Cheap/no-cost ways to feed it
+
+- **[VibeProxy](https://github.com/automazeio/vibeproxy)** — local proxy that lets you use
+  your existing **Codex / Claude / other subscriptions** as OpenAI-compatible endpoints,
+  instead of paying per-token API rates. Point `LEARN_LLM_BASE_URL` at it and the
+  pipeline runs on your subscription.
+- **[OpenCode Go](https://opencode.ai/go)** (~$10 plan) — OpenAI/Anthropic-compatible
+  endpoint with current open models (deepseek, kimi, glm…), works well as the
+  classify/suggest model.
+- **Ollama** local or cloud — the default; zero marginal cost if you already run it.
+
 Embeddings default to **local Ollama** (`http://localhost:11434/api/embed`) — transcripts
 never leave your machine for the embedding stage. Any OpenAI-style embeddings endpoint
 also works (detected by a `/v1/embeddings` URL):
