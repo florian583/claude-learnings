@@ -87,8 +87,8 @@ def _finding_path(project, category, title):
     return os.path.join(TREE, slugify(project, 30), f"{tag}--{slugify(title)}.md")
 
 
-def _resolve_evidence(cur, episode_ids, cap=15):
-    """'sid8:hash6' → (eid, role, date), newest first."""
+def _resolve_evidence(cur, episode_ids):
+    """'sid8:hash6' → [(eid, role, date), ...] newest first (uncapped)."""
     out = []
     for eid in episode_ids:
         sid, _, h = eid.partition(":")
@@ -97,8 +97,7 @@ def _resolve_evidence(cur, episode_ids, cap=15):
             (f"{sid}%", f"{h}%")).fetchone() if sid and h else None
         out.append((eid, row[0] if row else "?", (row[1] or "")[:10] if row else "?"))
     out.sort(key=lambda e: e[2], reverse=True)
-    hidden = max(0, len(out) - cap)
-    return out[:cap], hidden
+    return out
 
 
 def render_tree(conn, last_run_line=""):
@@ -111,7 +110,7 @@ def render_tree(conn, last_run_line=""):
            ORDER BY s.project, r.started DESC""").fetchall()
     os.makedirs(TREE, exist_ok=True)
 
-    written, by_project = set(), defaultdict(list)
+    written, by_project, records = set(), defaultdict(list), []
     for sid, cat, title, detail, ids_json, project, occ, created, last_seen in rows:
         project = project or "personal"
         path = _finding_path(project, cat, title)
@@ -129,11 +128,12 @@ def render_tree(conn, last_run_line=""):
             ids = json.loads(ids_json or "[]")
         except Exception:
             ids = []
-        ev, hidden = _resolve_evidence(cur, ids)
+        ev_all = _resolve_evidence(cur, ids)
+        ev, hidden = ev_all[:15], max(0, len(ev_all) - 15)
         ev_lines = "\n".join(f"- `{e}` — {role} — {date}" for e, role, date in ev) \
             or "- (evidence ids no longer resolvable)"
         if hidden:
-            ev_lines += f"\n- … +{hidden} more (see DB)"
+            ev_lines += f"\n- … +{hidden} more (see DB or index.json)"
 
         first = (created or "")[:10]
         last = (last_seen or created or "")[:10]
@@ -147,9 +147,15 @@ def render_tree(conn, last_run_line=""):
                     f"## Evidence (newest first)\n\n{ev_lines}\n\n"
                     f"Resolve an id `<session8>:<hash6>` with `ctraces show <session8>` or "
                     f"`sqlite3 episodes.db \"SELECT user_text FROM episodes WHERE content_hash LIKE '<hash6>%'\"`.\n")
-        by_project[project].append(
-            dict(title=title, cat=cat, rel=rel, occ=occ or 1,
-                 last=last, first=first, status=status))
+        item = dict(title=title, cat=cat, rel=rel, occ=occ or 1,
+                    last=last, first=first, status=status)
+        by_project[project].append(item)
+        records.append({
+            "id": sid, "project": project, "category": cat, "title": title,
+            "detail": detail or "", "status": status, "occurrences": occ or 1,
+            "first_seen": first, "last_seen": last, "file": rel,
+            "evidence": [{"id": e, "role": role, "date": date} for e, role, date in ev_all],
+        })
 
     # Index — one table per project, newest activity first.
     total = sum(len(v) for v in by_project.values())
@@ -169,6 +175,20 @@ def render_tree(conn, last_run_line=""):
         lines.append("")
     with open(INDEX, "w") as f:
         f.write("\n".join(lines))
+
+    # Machine-readable mirror for agents: filter with jq by project, category,
+    # status, dates — no sqlite3 needed on the machine reading it.
+    with open(os.path.join(TREE, "index.json"), "w") as f:
+        json.dump({
+            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "last_run": last_run_line,
+            "n_findings": len(records),
+            "projects": {p: len(v) for p, v in
+                         sorted(by_project.items(), key=lambda kv: -len(kv[1]))},
+            "findings": sorted(records, key=lambda r: (r["project"], r["last_seen"]),
+                               reverse=True),
+        }, f, indent=1, ensure_ascii=False)
+        f.write("\n")
 
     # Drop files for findings that no longer exist (dedupe merges, deletions).
     for root, _dirs, files in os.walk(TREE):

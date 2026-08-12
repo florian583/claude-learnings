@@ -168,6 +168,23 @@ Each finding file carries the latest detail, occurrence count, and its evidence
 ids (`<session8>:<hash6>`, newest first). Mark a finding `done` / `dismissed` by
 editing the `Status:` line — the regenerator keeps it.
 
+For agents, `suggestions/index.json` mirrors the whole queue (full detail +
+uncapped evidence with role and date per id), so filtering needs no sqlite3:
+
+```sh
+# open new-skill ideas for one project
+jq '.findings[] | select(.project=="myapp" and .category=="new-skill" and .status=="open")' \
+  ~/.claude-learnings/suggestions/index.json
+
+# findings that recurred 3+ times, newest evidence first
+jq '.findings[] | select(.occurrences >= 3) | {project, category, title, occurrences}' \
+  ~/.claude-learnings/suggestions/index.json
+
+# everything seen since a date
+jq '.findings[] | select(.last_seen >= "2026-08-01") | {project, title, last_seen}' \
+  ~/.claude-learnings/suggestions/index.json
+```
+
 Project names come from the working directory of each session. The generic
 heuristic (first path component after `projects/` or `worktrees/`, home dir →
 `personal`) usually does the right thing; override with
