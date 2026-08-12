@@ -4,7 +4,7 @@ Incremental: WHERE labels IS NULL."""
 import json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import db, chat_json
+from common import db, chat_json, CLASSIFY_MODEL
 
 BATCH = 8
 WORKERS = int(os.environ.get("LEARN_CLASSIFY_WORKERS", "4"))
@@ -34,7 +34,7 @@ def fmt(ep):
 def classify_chunk(chunk):
     msgs = [{"role": "user", "content": PROMPT + "\n\n".join(
         fmt(e).replace("{IDX}", str(j)) for j, e in enumerate(chunk))}]
-    out = chat_json(msgs)
+    out = chat_json(msgs, model=CLASSIFY_MODEL)
     res = out.get("episodes", [])
     by_i = {}
     for r in res:

@@ -99,6 +99,8 @@ export LEARN_EMBED_MODEL=<embedding model>
 | `LEARN_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible base URL |
 | `LEARN_LLM_API_KEY` | `ollama` | Bearer token for the LLM endpoint |
 | `LEARN_LLM_MODEL` | `qwen3:8b` | Model for classify + suggest |
+| `LEARN_CLASSIFY_MODEL` | `LEARN_LLM_MODEL` | Override for the classify stage — a tiny local model works great (e.g. `lfm25vl` / LFM2.5-VL-3B: ~1.7GB, benchmarked 3x faster than cloud deepseek on this taxonomy task) |
+| `LEARN_SUGGEST_MODEL` | `LEARN_LLM_MODEL` | Override for the suggest stage — quality-sensitive, use your best model |
 | `LEARN_EMBED_URL` | `http://localhost:11434/api/embed` | Embeddings endpoint |
 | `LEARN_EMBED_MODEL` | `qwen3-embedding:4b` | Embedding model |
 | `LEARN_MAX_CALLS` | `25` | Max LLM calls per suggest run (backfill: `LEARN_MAX_CALLS=200`) |
@@ -108,6 +110,24 @@ export LEARN_EMBED_MODEL=<embedding model>
 Reasoning models (deepseek, qwen3 thinking) are supported — thinking blocks are stripped
 and the token budget leaves headroom. Keep your client socket timeout **above** any
 proxy's upstream header timeout; aborting mid-flight can trip proxy circuit breakers.
+
+### Tiny local model for the classify stage
+
+The classify stage is a simple taxonomy task — a ~3B local model handles it well and
+runs 3x faster than a cloud call. [LFM2.5-VL-3B](https://huggingface.co/LiquidAI/LFM2.5-VL-3B-GGUF)
+is a good pick (also vision-capable if you extend the pipeline to screenshots):
+
+```sh
+# Ollama doesn't ship a lfm2.5-vl tag yet — create it from the GGUF:
+curl -L -o /tmp/lfm.gguf https://huggingface.co/LiquidAI/LFM2.5-VL-3B-GGUF/resolve/main/LFM2.5-VL-3B-Q4_K_M.gguf
+(cd /tmp && printf 'FROM ./lfm.gguf\n' > Modelfile && ollama create lfm25vl -f Modelfile)
+
+export LEARN_CLASSIFY_MODEL=lfm25vl     # classify: local, free, fast
+export LEARN_SUGGEST_MODEL=deepseek-v4-flash   # suggest: keep a strong model
+```
+
+Small models occasionally drop an episode or two from a batch — harmless here:
+unreturned episodes stay unlabeled and are retried on the next run.
 
 ## Scheduling
 

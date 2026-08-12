@@ -10,7 +10,7 @@ Never implements anything; the markdown is a review queue for a human.
 import json, os, sys
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import db, chat_json, LLM_MODEL, OUT
+from common import db, chat_json, SUGGEST_MODEL, OUT
 
 BATCH = 40            # episodes per LLM call
 # Bound LLM calls per run; the rest waits for the next run.
@@ -84,7 +84,7 @@ def main():
     started = datetime.now(timezone.utc)
     run_id = cur.execute(
         "INSERT INTO runs (started, model, episodes_user, episodes_assistant, status) VALUES (?,?,?,?,?)",
-        (started.isoformat(timespec="seconds"), LLM_MODEL, n_user, n_asst, "running")).lastrowid
+        (started.isoformat(timespec="seconds"), SUGGEST_MODEL, n_user, n_asst, "running")).lastrowid
     conn.commit()
 
     all_sugs, analyzed_hashes, failed = [], [], 0
@@ -98,7 +98,7 @@ def main():
         try:
             # Reasoning models (deepseek, qwen3 with thinking) consume
             # max_tokens on thinking: leave ample headroom for the text budget.
-            out = chat_json([{"role": "user", "content": prompt}], max_tokens=8000, deadline=240)
+            out = chat_json([{"role": "user", "content": prompt}], max_tokens=8000, deadline=240, model=SUGGEST_MODEL)
             sugs = out.get("suggestions", [])
             by_id = {f"{(r[1] or '?')[:8]}:{r[0][:6]}": r for r in chunk}
             for s in sugs:

@@ -23,6 +23,11 @@ DB = os.path.join(OUT, "episodes.db")
 LLM_BASE_URL = os.environ.get("LEARN_LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
 LLM_API_KEY = os.environ.get("LEARN_LLM_API_KEY", "ollama")
 LLM_MODEL = os.environ.get("LEARN_LLM_MODEL", "qwen3:8b")
+# Per-stage overrides. Classify is a cheap taxonomy task — a tiny local model
+# (e.g. LFM2.5-VL-3B, ~1.7GB, benchmarked 3x faster than cloud deepseek on this
+# workload) is plenty. Suggest is quality-sensitive: give it your best model.
+CLASSIFY_MODEL = os.environ.get("LEARN_CLASSIFY_MODEL", LLM_MODEL)
+SUGGEST_MODEL = os.environ.get("LEARN_SUGGEST_MODEL", LLM_MODEL)
 
 # --- embeddings ---
 EMBED_URL = os.environ.get("LEARN_EMBED_URL", "http://localhost:11434/api/embed")
@@ -134,8 +139,9 @@ def _strip_thinking(text):
     return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
 
 
-def chat_json(messages, max_tokens=4000, retries=3, deadline=240):
+def chat_json(messages, max_tokens=4000, retries=3, deadline=240, model=None):
     """OpenAI-compatible chat-completions call expecting a JSON object back.
+    model defaults to LLM_MODEL; stages pass their per-stage override.
     Hard wall-clock deadline guards against drip-streaming stalls (urllib's
     timeout only covers per-socket-ops, a slowly-streaming body never trips it).
 
@@ -146,7 +152,7 @@ def chat_json(messages, max_tokens=4000, retries=3, deadline=240):
     breakers, can cascade into error storms for other clients.
     """
     import urllib.request
-    body = {"model": LLM_MODEL, "max_tokens": max_tokens,
+    body = {"model": model or LLM_MODEL, "max_tokens": max_tokens,
             "temperature": 0.1, "messages": messages}
     url = f"{LLM_BASE_URL}/chat/completions"
     for attempt in range(retries):
